@@ -1,0 +1,71 @@
+<sdf version="1.7">
+    <model name="custom_heightmap">
+
+        <!-- The model won't move, it's static in the environment -->
+        <static>true</static>
+
+        <link name="link">
+            <!-- Collision geometry for the heightmap -->
+            <collision name="collision">
+                <geometry>
+                    <heightmap>
+                        <!-- Location of the heightmap image -->
+                        <uri>model://custom_heightmap/materials/textures/heightmap.png</uri>
+
+                        <!-- Dimensions of the heightmap in Gazebo: width x height x elevation -->
+                        <size>129 129 10</size>
+
+                        <!-- Position of the heightmap -->
+                        <pos>0 0 0</pos>
+                    </heightmap>
+                </geometry>
+            </collision>
+
+            <!-- Visual representation of the heightmap -->
+            <visual name="visual_abcedf">
+                <geometry>
+                    <heightmap>
+                        <!-- Disable terrain paging to improve performance at the cost of visual fidelity -->
+                        <use_terrain_paging>false</use_terrain_paging>
+
+                        <!-- Define textures for the heightmap -->
+                        <!-- <texture>
+                            <diffuse>model://custom_heightmap/materials/textures/dirt_diffusespecular.png</diffuse>
+                            <normal>model://custom_heightmap/materials/textures/flat_normal.png</normal>
+                            <size>1</size>
+                        </texture> -->
+                        <texture>
+                            <diffuse>model://custom_heightmap/materials/textures/grass_diffusespecular.png</diffuse>
+                            <normal>model://custom_heightmap/materials/textures/grass_normal.png</normal>
+                            <size>1</size>
+                        </texture>
+                        <!-- <texture>
+                            <diffuse>model://custom_heightmap/materials/textures/fungus_diffusespecular.png</diffuse>
+                            <normal>model://custom_heightmap/materials/textures/flat_normal.png</normal>
+                            <size>1</size>
+                        </texture> -->
+
+                        <!-- Blending information between textures based on height -->
+                        <blend>
+                            <min_height>2</min_height>
+                            <fade_dist>5</fade_dist>
+                        </blend>
+                        <blend>
+                            <min_height>4</min_height>
+                            <fade_dist>5</fade_dist>
+                        </blend>
+
+                        <!-- Location of the heightmap image -->
+                        <uri>model://custom_heightmap/materials/textures/heightmap.png</uri>
+
+                        <!-- Dimensions of the heightmap in Gazebo: width x height x elevation -->
+                        <size>129 129 10</size>
+
+                        <!-- Position of the heightmap -->
+                        <pos>0 0 0</pos>
+                    </heightmap>
+                </geometry>
+            </visual>
+        </link>
+    </model>
+</sdf>
