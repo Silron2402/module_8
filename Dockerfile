@@ -20,7 +20,7 @@ RUN /bin/bash Tools/setup/ubuntu.sh
 RUN DONT_RUN=1 make px4_sitl_default gazebo -j$(nproc)
 
 COPY scripts/install_ros_tools_for_uav.sh /install_tmp.sh
-RUN /install_tmp.sh
+RUN sudo chmod +x /install_tmp.sh && /install_tmp.sh
 RUN rm /install_tmp.sh
 
 #install opencv
