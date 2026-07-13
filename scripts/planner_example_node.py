@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import os
 import heapq
 import numpy as np
@@ -48,5 +49,4 @@ if __name__ == "__main__":
     
     # Spin to keep the node running
     rospy.spin()
-    
     
