@@ -7,6 +7,7 @@
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <random>
+#include <tf2/transform_datatypes.h>
 
 // конструктор класса
 Avoidance::Avoidance(ros::NodeHandle &n, const std::string &uavName)
@@ -169,7 +170,6 @@ bool Avoidance::processLidarAndPlan()
 
     // Шаг в радианах
     double delta = sector_width_rad_;
-    
 
     // ROS_INFO("angle_min %f", scanData_.angle_min);
     //  ROS_INFO("angle_increment %f", scanData_.angle_increment);
@@ -220,7 +220,7 @@ bool Avoidance::processLidarAndPlan()
         // Проверка: расстояние меньше безопасного радиуса
         if (range < safety_radius_)
         {
-            sector_cost_[number] += max_cost_per_point * 5.0; // усиленный штраф
+            sector_cost_[number] += max_cost_per_point * 15.0; // усиленный штраф
         }
         else
         {
@@ -228,7 +228,7 @@ bool Avoidance::processLidarAndPlan()
         }
 
         // ВОТ ЗДЕСЬ обновляем минимум по сектору:
-        if (range < min_range_in_sector_[number]) 
+        if (range < min_range_in_sector_[number])
         {
             min_range_in_sector_[number] = range;
         }
@@ -263,7 +263,7 @@ bool Avoidance::processLidarAndPlan()
 
     // publishVfhHistogram();*/
 }
-
+/*
 int Avoidance::selectBestSector() const
 {
     if (!has_global_goal_)
@@ -271,7 +271,7 @@ int Avoidance::selectBestSector() const
         int best = -1;
         double min_cost = 1e9;
 
-        const double cost_threshold = 10.0; // порог отсечения «опасных» секторов
+        const double cost_threshold = 100.0; // порог отсечения «опасных» секторов
 
         for (int i = 0; i < num_sectors_; ++i)
         {
@@ -300,6 +300,7 @@ int Avoidance::selectBestSector() const
     if (goal_angle < 0)
         goal_angle += 2 * M_PI;
 
+
     // Получаем угол рыскания (Yaw) из кватерниона ---
     const auto &q = currentPoseLocal_.pose.orientation;
     // Формула для получения Yaw из кватерниона (x, y, z, w)
@@ -318,7 +319,7 @@ int Avoidance::selectBestSector() const
         if (sector_cost_[i] > 100.0)
             continue; // Если сектор слишком опасен — пропускаем
 
-        if (min_range_in_sector_[i] < safety_radius_) 
+        if (min_range_in_sector_[i] < safety_radius_)
         {
         continue; // сектор считается непроходимым
         }
@@ -356,6 +357,158 @@ int Avoidance::selectBestSector() const
             best_sector = i;
         }
     }
+
+    return best_sector;
+}*/
+
+int Avoidance::selectBestSector()
+{
+    if (!has_global_goal_)
+    {
+        // Старая логика для случая без цели
+        int best = -1;
+        double min_cost = 1e9;
+        const double cost_threshold = 100.0;
+        for (int i = 0; i < num_sectors_; ++i)
+        {
+            if (sector_cost_[i] < cost_threshold && sector_cost_[i] < min_cost)
+            {
+                min_cost = sector_cost_[i];
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    // --- 1. Вычисляем целевой угол и индекс целевого сектора ---
+    double uavX = currentPoseLocal_.pose.position.x;
+    double uavY = currentPoseLocal_.pose.position.y;
+    double dx = global_goal_.point.x - uavX;
+    double dy = global_goal_.point.y - uavY;
+    double goal_angle = std::atan2(dy, dx);
+
+    // Нормализация goal_angle в [-PI, PI]
+    while (goal_angle < -M_PI)
+        goal_angle += 2 * M_PI;
+    while (goal_angle > M_PI)
+        goal_angle -= 2 * M_PI;
+
+    // Получаем Yaw дрона
+    const auto &q = currentPoseLocal_.pose.orientation;
+    double siny_cosp = 2.0 * (q.w * q.z + q.x * q.y);
+    double cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z);
+    double yaw_rad = std::atan2(siny_cosp, cosy_cosp);
+
+
+    // Находим индекс сектора, который максимально совпадает с направлением на цель
+    int target_sector = -1;
+    double min_diff = 1e9;
+    for (int i = 0; i < num_sectors_; ++i)
+    {
+        double sector_angle_local = (i + 0.5) * sector_width_rad_;
+        double sector_angle_global = yaw_rad + sector_angle_local;
+        while (sector_angle_global < -M_PI)
+            sector_angle_global += 2 * M_PI;
+        while (sector_angle_global > M_PI)
+            sector_angle_global -= 2 * M_PI;
+
+        double diff = std::abs(sector_angle_global - goal_angle);
+        if (diff > M_PI)
+            diff = 2 * M_PI - diff;
+
+        if (diff < min_diff)
+        {
+            min_diff = diff;
+            target_sector = i;
+        }
+    }
+
+    if (target_sector == -1)
+        return -1;
+
+    // --- 2. ФИЛЬТРАЦИЯ: оставляем только безопасные секторы ---
+    // Безопасный сектор не слишком дорогой И дистанция больше радиуса безопасности
+    std::vector<int> safe_sectors;
+    
+    const double cost_threshold = 100.0;
+
+    for (int i = 0; i < num_sectors_; ++i)
+    {
+        if (sector_cost_[i] > cost_threshold)
+            continue;
+        if (min_range_in_sector_[i] < safety_radius_)
+            continue;
+
+        safe_sectors.push_back(i);
+    }
+
+    if (safe_sectors.empty())
+    {
+        // Если безопасных секторов нет вообще - экстренная остановка или возврат последнего известного
+        // Для простоты вернем -1, чтобы контроллер мог затормозить
+        return -1;
+    }
+
+    // --- 3. ВЫБОР: Стратегия "Плавный облет" ---
+    // Вместо простого поиска ближайшего к target_sector, мы ищем сектор, который:
+    // А) Безопасен (уже отфильтровано)
+    // Б) Позволяет продолжить начатый манёвр (гистерезис)
+    // В) Имеет максимальный запас расстояния (чтобы не лететь вплотную к стене)
+
+    int best_sector = -1;
+    double best_score = 1e9; // Минимизируем это число
+
+    // Параметр: насколько сильно мы хотим держаться подальше от препятствий (вес дистанции)
+    // Чем больше значение, тем шире дрон будет облетать стены
+    const double safety_weight = 25.0;
+
+    for (int i : safe_sectors)
+    {
+        // 1. Штраф за отклонение от курса
+        double sector_angle_local = (i + 0.5) * sector_width_rad_;
+        double sector_angle_global = yaw_rad + sector_angle_local;
+
+        //нормализация угла
+        while (sector_angle_global < -M_PI)
+            sector_angle_global += 2 * M_PI;
+        while (sector_angle_global > M_PI)
+            sector_angle_global -= 2 * M_PI;
+
+        double diff = std::abs(sector_angle_global - goal_angle);
+        if (diff > M_PI)
+            diff = 2 * M_PI - diff;
+        double course_penalty = diff * diff; // Квадратичный штраф
+
+        // 2. Бонус за дистанцию (чем дальше стена в этом секторе, тем лучше)
+        // Используем min_range_in_sector_. Чем больше значение, тем меньше штраф.
+        // Формула: (MaxPossibleRange - currentRange). Инвертируем, чтобы максимизировать дистанцию.
+        double distance_bonus = -min_range_in_sector_[i];
+
+        // 3. (Опционально) Гистерезис по предыдущему сектору.
+        
+        double hysteresis_bonus = 0.0;
+        if (last_selected_sector_ != -1 && i == last_selected_sector_)
+        {
+            hysteresis_bonus = -5.0; // Небольшой бонус, чтобы не менять решение без нужды
+        }
+
+
+
+        // ИТОГОВЫЙ СЧЕТ
+        // Мы хотим минимизировать отклонение (course_penalty) и минимизировать близость к стене (distance_bonus отрицателен)
+        //double total_score = course_penalty + safety_weight * distance_bonus;
+        double total_score = course_penalty + safety_weight * distance_bonus + hysteresis_bonus;
+
+
+        if (total_score < best_score)
+        {
+            best_score = total_score;
+            best_sector = i;
+        }
+        
+    }
+
+    last_selected_sector_ = best_sector;
 
     return best_sector;
 }
@@ -417,8 +570,10 @@ geometry_msgs::PoseStamped Avoidance::makeLocalGoal(int sector_idx)
     double yaw_rad = std::atan2(siny_cosp, cosy_cosp);
 
     double global_angle = yaw_rad + sector_local_angle;
-    while (global_angle < -M_PI) global_angle += 2 * M_PI;
-    while (global_angle >  M_PI) global_angle -= 2 * M_PI;
+    while (global_angle < -M_PI)
+        global_angle += 2 * M_PI;
+    while (global_angle > M_PI)
+        global_angle -= 2 * M_PI;
 
     // Сначала считаем базовую дистанцию
     double dst = set_distance(sector_idx);
@@ -432,7 +587,8 @@ geometry_msgs::PoseStamped Avoidance::makeLocalGoal(int sector_idx)
     // Если цель небезопасна — уменьшаем дистанцию и пересчитываем
     double safety = safety_radius_ + 0.2; // небольшой буфер
     int attempts = 0;
-    while (!isGoalSafe(goal, safety) && dst > 0.3 && attempts < 5) {
+    while (!isGoalSafe(goal, safety) && dst > 0.3 && attempts < 5)
+    {
         dst *= 0.7; // уменьшаем дистанцию
         goal.pose.position.x = uavX + dst * std::cos(global_angle);
         goal.pose.position.y = uavY + dst * std::sin(global_angle);
@@ -441,7 +597,6 @@ geometry_msgs::PoseStamped Avoidance::makeLocalGoal(int sector_idx)
 
     return goal;
 }
-
 
 void Avoidance::setGlobalGoal(double x, double y, double z)
 {
@@ -766,7 +921,7 @@ void Avoidance::publishVfhHistogram()
         }
     }
 
-    //Заполняем points
+    // Заполняем points
     trajectory_line.points.clear();
     for (const auto &pt : trajectory)
     {
@@ -824,7 +979,7 @@ void Avoidance::publishVfhHistogram()
     p_end.x = lookahead_distance_ * std::cos(zero_sector_angle); // + currentPoseLocal_.pose.position.x;
     p_end.y = lookahead_distance_ * std::sin(zero_sector_angle); // + currentPoseLocal_.pose.position.y;
     p_end.z = 0;
-    //currentPoseLocal_.pose.position.z;
+    // currentPoseLocal_.pose.position.z;
 
     arrow_marker_.points.push_back(p_start);
     arrow_marker_.points.push_back(p_end);
@@ -856,9 +1011,9 @@ void Avoidance::publishVfhHistogram()
         // p_start.x = uavX;
         // p_start.y = uavY;
         // p_start.z = uavZ; // относительно pose
-        p_end.x = 1 * std::cos(target_angle);// + currentPoseLocal_.pose.position.x;
-        p_end.y = 1 * std::sin(target_angle);// + currentPoseLocal_.pose.position.y;
-        p_end.z = 0; //currentPoseLocal_.pose.position.z;
+        p_end.x = 1 * std::cos(target_angle); // + currentPoseLocal_.pose.position.x;
+        p_end.y = 1 * std::sin(target_angle); // + currentPoseLocal_.pose.position.y;
+        p_end.z = 0;                          // currentPoseLocal_.pose.position.z;
 
         global_goal_marker_.points.push_back(p_start);
         global_goal_marker_.points.push_back(p_end);
@@ -998,10 +1153,10 @@ void Avoidance::hover()
 
 double Avoidance::set_distance(int sector_idx)
 {
-    //установим базовую дистанцию
+    // установим базовую дистанцию
     double base_distance = lookahead_distance_;
 
-    //рассчитаем величину
+    // рассчитаем величину
     int i = sector_idx;
     double value = sector_cost_[i];
 
@@ -1018,8 +1173,7 @@ double Avoidance::set_distance(int sector_idx)
         }
     }
 
-
-    //проверим положение дрона
+    // проверим положение дрона
     double delta_x = currentPoseLocal_.pose.position.x - global_goal_.point.x;
     double delta_y = currentPoseLocal_.pose.position.y - global_goal_.point.y;
     double delta_z = currentPoseLocal_.pose.position.z - global_goal_.point.z;
@@ -1029,14 +1183,13 @@ double Avoidance::set_distance(int sector_idx)
     if (dist < base_distance)
     {
         base_distance = dist;
-    } 
+    }
 
-    return base_distance;   
-
+    return base_distance;
 }
 
-//проверка безопасности локальной цели
-bool Avoidance::isGoalSafe(const geometry_msgs::PoseStamped & goal, double safety_margin) const
+// проверка безопасности локальной цели
+bool Avoidance::isGoalSafe(const geometry_msgs::PoseStamped &goal, double safety_margin) const
 {
     if (scanData_.ranges.empty())
         return false;
@@ -1047,10 +1200,13 @@ bool Avoidance::isGoalSafe(const geometry_msgs::PoseStamped & goal, double safet
     // Проверяем все точки лидара в их «сырых» углах и считаем их позицию
     // относительно дрона, затем переводим в map через текущую позицию дрона.
     // Это грубая проверка, но достаточная, чтобы не ставить цель в препятствие.
-    for (size_t i = 0; i < scanData_.ranges.size(); ++i) {
+    for (size_t i = 0; i < scanData_.ranges.size(); ++i)
+    {
         double r = scanData_.ranges[i];
-        if (std::isnan(r) || std::isinf(r)) continue;
-        if (r < scanData_.range_min || r > scanData_.range_max) continue;
+        if (std::isnan(r) || std::isinf(r))
+            continue;
+        if (r < scanData_.range_min || r > scanData_.range_max)
+            continue;
 
         double angle = scanData_.angle_min + i * scanData_.angle_increment;
         // Позиция точки лидара относительно дрона
@@ -1063,9 +1219,10 @@ bool Avoidance::isGoalSafe(const geometry_msgs::PoseStamped & goal, double safet
 
         double dx = gx - px;
         double dy = gy - py;
-        double dist_sq = dx*dx + dy*dy;
+        double dist_sq = dx * dx + dy * dy;
 
-        if (dist_sq < (safety_margin * safety_margin)) {
+        if (dist_sq < (safety_margin * safety_margin))
+        {
             return false; // Цель слишком близко к точке лидара
         }
     }

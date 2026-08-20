@@ -53,7 +53,7 @@ public:
     bool isConnected() const;
 
     //Выбор сектора для полета
-    int selectBestSector() const;
+    int selectBestSector();
 
     geometry_msgs::PoseStamped makeLocalGoal(int sector_idx);
 
@@ -135,7 +135,7 @@ private:
     void scanDataCallback(const sensor_msgs::LaserScan::ConstPtr& msg);
 
     // Параметры VFH2D
-    int num_sectors_ = 360; //Число секторов
+    int num_sectors_ = 36; //Число секторов
     double sector_width_rad_ = 2.0 * M_PI / num_sectors_; //Угол сектора
     double safety_radius_ = 1.0;        // минимальный безопасный радиус (м)
     double lookahead_distance_ = 2;    // дистанция до локальной цели (м)
@@ -166,6 +166,8 @@ private:
 
     //лучший сектор
     int thebest;
+
+    int last_selected_sector_ = -1;
 
     
     ros::Time last_goal_time_;

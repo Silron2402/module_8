@@ -82,7 +82,7 @@ int main(int argc, char **argv)
     //copterControl.publishVfhHistogram();
 
     //copterControl.go_to_global(5,2,target_altitude);
-    copterControl.go_to_global(-4, 16,target_altitude);
+    copterControl.go_to_global(-5, 18,target_altitude);
     copterControl.go_to_global(2, 22,target_altitude);
     copterControl.go_to_global(3, 6,target_altitude);
 
